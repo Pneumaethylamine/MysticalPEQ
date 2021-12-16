@@ -1,0 +1,1188 @@
+---
+title: "A Quantitative and Qualitative Report of Psilocybin Induced
+Mystical-Type Experiences and Their Relation to 
+Lasting Positive Effects
+
+output: html_notebook
+---
+
+Please contact drummond.mcculloch@nru.dk or dea@nru.dk if you have any questions
+
+All file names have been removed for anonymisation purposes
+
+Import packages
+
+```{r}
+require(readtext)
+library(stringr)
+require(tidyverse)
+require(tidytext)
+require(widyr)
+library(igraph)
+library(scales)
+library(tokenizers)
+library(gridExtra)
+library(grid)
+library(lattice)
+library(readxl)
+require(lava)
+library(lavaSearch2)
+require(varhandle)
+require(dplyr)
+require(tidyr)
+require(readr)
+require(nlme)
+require(RColorBrewer)
+require(forcats)
+```
+
+Uploading the .txt files of all files merged with and without participant divisions
+
+```{r}
+#just the text of each report
+
+merged <- readtext()
+merged <- merged$text
+merged_subbed <- gsub("Ã¸", "ø", merged)
+merged_subbed <- gsub("Ã˜", "Ø", merged_subbed)
+merged_subbed <- gsub("Ã¥", "å", merged_subbed)
+merged_subbed <- gsub("Ã¦", "æ", merged_subbed)
+merged_subbed <- gsub("â€œ", "", merged_subbed)
+merged_subbed <- gsub("â€\u009d", "", merged_subbed)
+merged_subbed <- gsub("â€", "", merged_subbed)
+merged_subbed <- gsub("Â°", "°", merged_subbed)
+merged_subbed <- gsub("â€™", "", merged_subbed)
+merged_subbed <- gsub("Ã©", "é", merged_subbed)
+merged_subbed <- gsub("\n", "", merged_subbed)
+
+merged_sentences <- unlist(tokenize_sentences(merged_subbed))
+mdf <- as.data.frame(m_words, col.names = "word")
+mdf <- rename(mdf, word = m_words)
+
+#text of each report with "PARTICIPANT1" before the first report etc
+
+mergedparticipants <- readtext()
+mergedpar <- mergedparticipants$text
+mergedpar_subbed <- gsub("Ã¸", "ø", mergedpar)
+mergedpar_subbed <- gsub("Ã¥", "å", mergedpar_subbed)
+mergedpar_subbed <- gsub("Ã¦", "æ", mergedpar_subbed)
+mergedpar_subbed <- gsub("â€œ", "", mergedpar_subbed)
+mergedpar_subbed <- gsub("â€\u009d", "", mergedpar_subbed)
+mergedpar_subbed <- gsub("â€", "", mergedpar_subbed)
+mergedpar_subbed <- gsub("Â°", "°", mergedpar_subbed)
+mergedpar_subbed <- gsub("â€™", "", mergedpar_subbed)
+mergedpar_subbed <- gsub("Ã©", "é", mergedpar_subbed)
+mergedpar_subbed <- gsub("\n", "", mergedpar_subbed)
+
+#split by participant
+
+mpar_sentences <- unlist(tokenize_sentences(mergedpar_subbed)) #1569 sentences
+
+parsent <- as.data.frame(mpar_sentences, col.names = "sentence")
+byparsent <- parsent %>%
+  mutate(participant = cumsum(str_detect(mpar_sentences, "PARTICIPANT")))
+
+
+mpar_words <- unlist(str_split(str_squish((str_replace_all(mergedpar_subbed, regex("\\W+"), " "))), " "))
+pardf <- as.data.frame(mpar_words, col.names = "word")
+pardf <- rename(pardf, word = mpar_words)
+by_participant <- pardf %>%
+  mutate(participant = cumsum(str_detect(word, "PARTICIPANT")))
+range(by_participant$participant)
+
+#Split up the reports so we can get a sentida score for each
+pardflist <- split(byparsent, f = byparsent$participant)
+
+#A list, without the first line that just says "PARTICIPANT"
+par_sentences_sep <- list(NULL)
+for (i in 1:length(pardflist)) {
+par_sentences_sep[[i]] <- pardflist[[i]]$mpar_sentences[-1]
+}
+```
+
+Bag of words analyses
+Stop words: https://gist.github.com/berteltorp/0cf8a0c7afea7f25ed754f24cfc2467b
+
+Removing stop words
+
+```{r}
+self_ref <-  c("mig", "jeg", "min", "selv", "mine")
+self_ref <-  as.data.frame(self_ref)
+self_ref <- self_ref %>% rename(word = self_ref)
+
+mys_keywords <-  c("sandhed", "lys", "enhed", "sammen", "hellig", "samvær", "magi", "mystisk", "gud", "guder", "ånd", "ærbødighed", "uendelighed", "evighed", "ultimativ", "fred", "ro", "frihed", "ren", "ekstase", "ærefrygt")
+mys_keywords <-  as.data.frame(mys_keywords)
+mys_keywords <- mys_keywords %>% rename(word = mys_keywords)
+
+#stop words and fixing the æøå
+stoporder <- readtext()
+stopord <- stoporder[[2]]
+so <- gsub("Ã¸", "ø", stopord)
+so <- gsub("Ã¥", "å", so)
+so <- gsub("Ã¦", "æ", so)
+so <- str_split(so, "\n")
+sodf <- as.data.frame(so, col.names = "word")
+
+bigram_sws <- c("aldrig", "alene", "alle", "alt", "altid", "god", "godt", "hel", "ikke", "imod", "meget", "nogensinde", "stor", "uden", "ingen", "store", "intet", "lille", "sammen")
+sodf_Bigrams <- sodf %>% 
+  filter(!word %in% bigram_sws)
+
+sodf_wordclouds <- c("aldrig", "alene", "alle", "alt", "altid", "god", "godt", "hel", "imod", "al", "nogensinde", "stor", "uden", "ingen", "store", "intet", "lille", "sammen")
+sodf_wordclouds <- sodf %>% 
+  filter(!word %in% sodf_wordclouds)
+
+#custom stop words
+customso <- c("Jeg", "Det", "Der", "Den")
+customso <- as.data.frame(customso)
+customso <- rename(customso, word = customso)
+
+mdfso <- mdf %>%
+  anti_join(sodf_wordclouds, by = "word") %>%
+  anti_join(customso, by = "word")
+
+```
+
+transfer to python for lemmatizing
+
+```{r}
+write.table(mdfso, file = "", append = FALSE, sep = "", dec = ".",
+            row.names = F, col.names = F)
+
+```
+
+Read in and apply
+
+```{r}
+
+#see python script (Lemmatising NLP Psilo.py) for details
+
+lemma <- readtext("")
+lemma <- lemma$text
+lemmasplit <- str_split(unlist(lemma), "\n")
+lemmadf <- as.data.frame(lemmasplit, colnames = "word")
+lemmadf <- lemmadf %>% rename(word = "c..tage....kronolologisk....lettest....Alleret....scanner....påvirke..." )
+length(unique(lemmadf$word))
+
+```
+
+Tf-IDf analyses and plot
+
+```{r}
+#Read from csv
+
+mys_lemma <- read.csv("", sep = ";")
+mys_lemma <- data.frame(word = mys_lemma$word)
+
+nonmys_lemma <- read.csv("", sep = ";")
+nonmys_lemma <- data.frame(word = nonmys_lemma$word)
+
+mysrawtotal <- dplyr::count(mys_lemma, word, sort = T)
+nonmysrawtotal <- dplyr::count(nonmys_lemma, word, sort = T)
+
+mysrawtotal$total <- sum(mysrawtotal$n)
+mysrawtotal$type <- "Mystical"
+nonmysrawtotal$total <- sum(nonmysrawtotal$n)
+nonmysrawtotal$type <- "Non-Mystical"
+
+mysrawtotal <- rbind(mysrawtotal, nonmysrawtotal)
+
+mys_raw_tf_idf <-  mysrawtotal %>%
+  bind_tf_idf(word, type, n)
+
+mys_raw_tf_idf %>%
+  select(-total) %>%
+  arrange(desc(tf_idf))
+
+mys_raw_tf_idf_plot <- mys_raw_tf_idf %>%
+  group_by(type) %>%
+  slice_max(tf_idf, n = 9) %>%
+  ungroup()
+
+mys_raw_tf_idf_plot$word <- as.character(mys_raw_tf_idf_plot$word)
+
+mys_raw_tf_idf_plot[11,1] <- "stråle"
+
+ggplot(mys_raw_tf_idf_plot, aes(tf_idf, fct_reorder(word, tf_idf), fill = type)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~type, ncol = 2, scales = "free") +
+  labs(title = "tf-idf analyses of lemmatised words from PER", x = "tf-idf", y = NULL) +
+  scale_y_discrete(labels = c("univers" = "Universe","far" = "Dad", "MR" = "Magnetic Resonance", "smuk" = "Beautiful", "Samtidig" = "Simultaneous", "uendelig" = "Infinite", "lilla" = "Purple", "ift" = "In relation to", "stråle" = "Ray", "lykkelig" = "Happy", "bror" = "Brother", "dyster" = "Gloomy", "cyklus" = "Cycle", "onde" = "Evil", "koldt" = "Cold", "behov" = "Need", "selvbevidst" = "Self-Conscious", "sanse" = "Sense", "omslutte" = "Enclose", "dikotomi" = "Dichotomy"))
+
+
+mys_tfidfplot <- mys_raw_tf_idf_plot[mys_raw_tf_idf_plot$type == "Mystical",]
+
+ggplot(mys_tfidfplot, aes(tf_idf, fct_reorder(word, tf_idf), fill = -tf_idf)) +
+  geom_col(show.legend = FALSE) + theme_minimal() +
+  labs(title = "     Tf-idf Scores From CME Reports", x = "Tf-idf Score", y = NULL) +
+  scale_y_discrete(labels = c("univers" = "Universe","far" = "Dad", "MR" = "Magnetic Resonance", "smuk" = "Beautiful", "Samtidig" = "Simultaneous", "uendelig" = "Infinite", "lilla" = "Purple", "ift" = "In relation to", "stråle" = "Ray", "lykkelig" = "Happy", "bror" = "Brother")) +
+  scale_x_continuous(labels = c(0, expression("2 x 10"^-4), expression("4 x 10"^-4),expression("6 x 10"^-4))) +
+  theme(axis.text.y.left = element_text(size = 11), axis.text.x.bottom = element_text(size = 11))
+
+ggsave("", height = 5, width = 8, dpi = 500)
+```
+
+Uploading MEQ, PEQ and CIMBI-IDs from database
+
+```{r}
+db <- read.csv2("", header = T, sep = ",")
+
+db2 <- db %>%
+  select(-PEQ.comments, -Date.of.MEQ30.examination, -Date.of.PEQ.examination) %>%
+  rename(MEQ_mystical = MEQ30...Factor.score..Mystical..0.5.,
+         MEQ_mood = MEQ30...Factor.score..Positive.mood..0.5.,
+         MEQ_timespace = MEQ30...Factor.score..Transcendence.of.time.and.space..0.5.,
+         MEQ_ineffability = MEQ30...Factor.score..Ineffability..0.5.,
+         MEQ_mean = MEQ30...Total.score..0.5.,
+         PEQ_poslife = PEQ.subscale...Positive.attitudes.about.life..0.100..,
+         PEQ_neglife = PEQ.subscale...Negative.attitudes.about.life..0.100..,
+         PEQ_posself = PEQ.subscale...Positive.attitudes.about.self..0.100..,
+         PEQ_negself = PEQ.subscale...Negative.attitudes.about.self..0.100..,
+         PEQ_posmood = PEQ.subscale...Positive.mood.changes..0.100..,
+         PEQ_negmood = PEQ.subscale...Negative.mood.changes..0.100..,
+         PEQ_possoc = PEQ.subscale...Altruistic.Positive.social.effects..0.100..,
+         PEQ_negsoc = PEQ.subscale...Antisocial.Negative.social.effects..0.100..,
+         PEQ_posbehav = PEQ.subscale...Positive.behavior.changes..0.100..,
+         PEQ_negbehav = PEQ.subscale...Negative.behavior.changes..0.100..,
+         PEQ_posspir = PEQ.subscale...Increased.spirituality..0.100..,
+         PEQ_negspir = PEQ.subscale...Decreased.spirituality..0.100..) %>%
+  mutate(date = as.Date(Date.of.psilocybin.report, tryFormats =c("%d/%m/%Y"))) %>%
+  mutate(CIMBI.ID = as.double(CIMBI.ID)) %>%
+  arrange(date, desc = T) %>%
+  #mutate(sentida = R_sent) %>%
+  relocate(Report) %>%
+  select(-Date.of.psilocybin.report, -Overall.description.of.the.psychedelic.experience)
+
+db2$PEQ_poslife <- unfactor(db2$PEQ_poslife)
+db2$PEQ_neglife <- unfactor(db2$PEQ_neglife)
+db2$PEQ_posself <- unfactor(db2$PEQ_posself)
+db2$PEQ_negself <- unfactor(db2$PEQ_negself)
+db2$PEQ_posmood <- unfactor(db2$PEQ_posmood)
+db2$PEQ_negmood <- unfactor(db2$PEQ_negmood)
+db2$PEQ_possoc <- unfactor(db2$PEQ_possoc)
+db2$PEQ_negsoc <- unfactor(db2$PEQ_negsoc)
+db2$PEQ_posbehav <- as.double(db2$PEQ_posbehav)
+db2$PEQ_negbehav <- as.double(db2$PEQ_negbehav)
+db2$PEQ_posspir <- unfactor(db2$PEQ_posspir)
+db2$PEQ_negspir <- unfactor(db2$PEQ_negspir)
+db2$MEQ_mystical <- unfactor(db2$MEQ_mystical)
+db2$MEQ_mood <- unfactor(db2$MEQ_mood)
+db2$MEQ_timespace <- unfactor(db2$MEQ_timespace)
+db2$MEQ_ineffability <- unfactor(db2$MEQ_ineffability)
+db2$MEQ_mean <- unfactor(db2$MEQ_mean)
+
+db2 <- db2 %>%
+  rowwise() %>%
+  mutate(PEQ_pos = mean(c(PEQ_poslife, PEQ_posself, PEQ_posmood, PEQ_possoc, PEQ_posbehav, PEQ_posspir), na.rm = T)) %>%
+  ungroup()
+
+mystical <- db2 %>% 
+  filter(MEQ_mean >= 3)
+
+fullmystical <- mystical %>%
+  filter(MEQ_ineffability > 3) %>%
+  filter(MEQ_mystical > 3) %>%
+  filter(MEQ_mood > 3) %>%
+  filter(MEQ_timespace > 3)
+
+non_mystical <- db2 %>%
+  filter(MEQ_mean < 3)
+
+males <- db2 %>%
+  filter(Gender == 'Male')
+
+females <- db2 %>%
+  filter(Gender == 'Female')
+
+PEQpos <- db2 %>%
+  filter(PEQ_pos >= 25)
+
+PEQnull <- db2 %>%
+  filter(PEQ_pos < 25)
+
+writexl::write_xlsx(db2, "")
+```
+
+Ages
+
+```{r}
+ages <- read_xlsx("")
+
+ages <- ages %>%
+ unite(age_at_intv, 'Date of birth', 'First day of intervention', sep = "_")
+
+toRemove <- c()
+toKeep <- c()
+for (i in unique(ages$age_at_intv)){
+  matches <- which(ages$age_at_intv == i)
+  toKeep <- c(toKeep, matches[1])
+  toRemove <- c(toRemove,matches[2:length(matches)])
+}
+
+ages_extract <- ages[toKeep,]
+
+ages_extract <- ages_extract %>% 
+  separate(age_at_intv, c("DoB", "DoI"), sep = "_")
+
+ages_extractdb2 <- ages_extract %>%
+  rename(ID = "CIMBI ID")
+
+ages_extract_males <- ages_extractdb2 %>%
+    filter(ID %in% males$CIMBI.ID) %>%
+    arrange(ID) 
+ages_extract_males <- ages_extract_males[-2,]
+
+ages_extract_females <- ages_extractdb2 %>%
+    filter(ID %in% females$CIMBI.ID)
+
+ages_extract_females <- ages_extract_females[-4,] #Remove the 3mg participant
+
+ages_extract_males$DoB <- as.Date(ages_extract_males$DoB)
+ages_extract_males$DoI <- as.Date(ages_extract_males$DoI)
+
+ages_extract_females$DoB <- as.Date(ages_extract_females$DoB)
+ages_extract_females$DoI <- as.Date(ages_extract_females$DoI)
+
+male_ages <- ages_extract_males %>%
+  mutate(age = (DoI - DoB)/365) %>%
+  select(ID, DoB, DoI, age, "Weight (kg)", "Overall comments")
+
+female_ages <- ages_extract_females %>%
+  mutate(age = (DoI - DoB)/365) %>%
+  select(ID, DoB, DoI, age, "Weight (kg)", "Overall comments")
+
+ages <- rbind(male_ages, female_ages)
+
+mean(male_ages$`Weight (kg)`)
+sd(male_ages$`Weight (kg)`)
+
+mean(female_ages$`Weight (kg)`)
+sd(female_ages$`Weight (kg)`)
+
+mean(ages$age)
+sd(ages$age)
+range(ages$age)
+
+length(unique(male_ages$ID))
+
+project1 <- db2 %>% 
+  filter(Project == 1)
+
+project2 <- db2 %>% 
+  filter(Project == 2)
+  
+project3 <- db2 %>% 
+  filter(Project == 3)
+```
+
+Depression, Stress and Sleep
+
+```{r}
+Fulldata <- readxl::read_xlsx("")
+
+#MDI examination and PSS happen together
+summary(Fulldata$`Date of MDI examination` == Fulldata$`Date of Cohen PSS (at scan) examination`)
+
+f <- unique(Fulldata$`CIMBI ID`) #f = CIMBI IDs in Fulldata
+d <- unique(db2$CIMBI.ID) #d = CIMBI IDs in db2
+
+f[!(f %in% d)] # these are the two CIMBI IDs in FD that aren't in db2
+d[!(d %in% f)] # there are no people in db2 that aren't in fulldata
+```
+
+Ensure baseline psych scores are not different
+
+```{r}
+MDIextract <- Fulldata %>%
+  unite(ID.date, 'CIMBI ID', 'Date of MDI examination', sep = "_")
+
+toRemove <- c()
+toKeep <- c()
+for (i in unique(MDIextract$ID.date)){
+  matches <- which(MDIextract$ID.date == i)
+  toKeep <- c(toKeep, matches[1])
+  toRemove <- c(toRemove,matches[2:length(matches)])
+}
+
+MDIextractsub <- MDIextract[toKeep,]
+
+MDIextractsub <- MDIextractsub %>% 
+  select(ID.date, MDI, 'Cohen PSS (at scan)', 'PSQI global score') %>%
+  separate(ID.date, c("ID", "Date"), sep = "_") %>%
+  filter(ID %in% db2$CIMBI.ID)
+
+MDI_unite <- MDIextractsub %>%
+  unite(ID.date, 'ID', 'Date')
+
+db2_unite <- db2 %>%
+  unite(ID.date, 'CIMBI.ID', 'date')
+
+Baseline_psych <- MDIextractsub[MDI_unite$ID.date %in% db2_unite$ID.date,]
+
+db2[!db2_unite$ID.date %in% MDI_unite$ID.date,]
+
+day_after_psych <- MDIextractsub[MDIextractsub$Date %in% ] ##
+
+day_after_psych <-day_after_psych %>%
+  filter(ID %in% db2[!db2_unite$ID.date %in% MDI_unite$ID.date,]$CIMBI.ID)
+
+day_after_psych$Date <- as.Date(day_after_psych$Date)
+
+Baseline_psych <- rbind(day_after_psych, Baseline_psych)
+
+#Male vs female
+
+male_baseline <- Baseline_psych %>%
+  filter(ID %in% males$CIMBI.ID)
+
+female_baseline <- Baseline_psych %>%
+  filter(ID %in% females$CIMBI.ID)
+
+sd(female_baseline$`PSQI global score`)
+
+t.test(male_baseline$MDI, female_baseline$MDI)
+t.test(male_baseline$`Cohen PSS (at scan)`, female_baseline$`Cohen PSS (at scan)`)
+t.test(male_baseline$`PSQI global score`, female_baseline$`PSQI global score`)
+
+p.adjust(t$p.value, method = "bonferroni", n = 3)
+
+#Mystical vs Non-mystical
+
+mystical_baseline <- Baseline_psych %>%
+  filter(ID %in% mystical$CIMBI.ID)
+
+nonmys_baseline <- Baseline_psych %>%
+  filter(ID %in% non_mystical$CIMBI.ID)
+
+```
+
+Establish Dosesub
+
+```{r}
+Dosings <- Fulldata %>%
+  unite(Dose_date, 'Type of intervention', 'First day of intervention', sep = "_")
+
+toRemove <- c()
+toKeep <- c()
+for (i in unique(Dosings$Dose_date)){
+  matches <- which(Dosings$Dose_date == i)
+  toKeep <- c(toKeep, matches[1])
+  toRemove <- c(toRemove,matches[2:length(matches)])
+}
+
+Dosesub <- Dosings[toKeep,]
+
+Dosesub <- Dosesub %>% 
+  select('CIMBI ID', Dose_date, 'Weight (kg)', Gender) %>%
+  separate(Dose_date, c("Dose", "date"), sep = "_") %>%
+  rename(CIMBI.ID = 'CIMBI ID') %>%
+  filter(CIMBI.ID %in% db2$CIMBI.ID)
+
+Dosesub$date <- as.Date(Dosesub$date)
+Dosesub$Dose <- parse_number(Dosesub$Dose)
+
+length(unique(Dosesub$CIMBI.ID))
+
+FemaleDose <- Dosesub[Dosesub$Gender == "Female",]
+FemaleDose <- FemaleDose[FemaleDose$Dose != 3,]   #Remove the 3mg individual
+
+MaleDose <- Dosesub[Dosesub$Gender == "Male",]
+MaleDose <- MaleDose[-2,] #remove
+
+```
+
+Previous Drug Use
+
+```{r}
+pre <- readxl::read_xlsx("")
+pre <- pre %>% unite(IDprev, "CIMBI ID","Description of substances used")
+
+toRemove <- c()
+toKeep <- c()
+for (i in unique(pre$IDprev)){
+  matches <- which(pre$IDprev == i)
+  toKeep <- c(toKeep, matches[1])
+  toRemove <- c(toRemove,matches[2:length(matches)])
+}
+pre <- pre[toKeep,]
+pre <- pre %>% 
+  select(IDprev, Gender) %>%
+  separate(IDprev, c("ID", "Drug Use"), sep = "_")
+
+p <- unique(pre$ID)
+d <- unique(db2$CIMBI.ID)
+
+pre <- pre %>% filter(!ID == 55781, !ID == 55871)
+
+write_csv(pre, "", col_names = T, append = F)
+```
+
+Doses
+
+```{r}
+db2Doses <- Dosesub %>%
+  filter(!Dose == 3) %>%
+  filter(!Dose == 27) %>%
+  arrange(CIMBI.ID) 
+
+db2Doses <- db2Doses %>%
+  mutate(bw_dose = Dose/`Weight (kg)`) %>%
+  arrange(bw_dose)
+
+db2Doses <- db2Doses %>%
+  arrange(date)
+
+db2 <-  db2 %>% 
+  arrange(date)
+```
+
+Update db2 with ages and doses to make db3
+
+```{r}
+agesyr <- ages
+agesyr$age <- as.double(ages$age)
+agesyr$age <- round(agesyr$age, 1)
+
+db2 <- db2 %>% arrange(date)
+agesyr <- agesyr %>% arrange(DoI)
+
+db2Doses <- db2Doses %>% arrange(date)
+
+db3 <- cbind(db2, agesyr[,4], db2Doses[,2])
+
+db3$Project <- as.factor(db3$Project)
+
+writexl::write_xlsx(db3, "")
+```
+
+LVM per subscale
+
+```{r}
+
+db3 <- arrange(db3, Report)
+db4 <- db3[-27,]
+
+#Mystical
+NewLV_MYS <-lvm(c(PEQ_poslife,PEQ_posself,PEQ_posmood,PEQ_possoc,PEQ_posbehav, PEQ_posspir)~lv.peq)
+regression(NewLV_MYS) <- lv.peq ~ MEQ_mystical + age + Gender + Dose + Project
+regression(NewLV_MYS) <- MEQ_mystical ~ Dose + age + Gender + Project
+latent(NewLV_MYS) <- ~lv.peq
+covariance(NewLV_MYS) <- PEQ_poslife~PEQ_possoc
+eMys <- estimate(NewLV_MYS,db4)
+
+
+#Mood
+NewLV_Mood <-lvm(c(PEQ_poslife,PEQ_posself,PEQ_posmood,PEQ_possoc,PEQ_posbehav, PEQ_posspir)~lv.peq)
+regression(NewLV_Mood) <- lv.peq ~ MEQ_mood + age + Gender + Dose + Project
+regression(NewLV_Mood) <- MEQ_mood ~ Dose + age + Gender + Project
+latent(NewLV_Mood) <- ~lv.peq
+covariance(NewLV_Mood) <- MEQ_mood~PEQ_posspir 
+mMys <- estimate(NewLV_Mood,db4)
+
+
+#Timespace
+NewLV_TS <-lvm(c(PEQ_poslife,PEQ_posself,PEQ_posmood,PEQ_possoc,PEQ_posbehav, PEQ_posspir)~lv.peq)
+regression(NewLV_TS) <- lv.peq ~ MEQ_timespace + age + Gender + Dose + Project
+regression(NewLV_TS) <- MEQ_timespace ~ Dose + age + Gender + Project
+latent(NewLV_TS) <- ~lv.peq
+covariance(NewLV_TS) <- PEQ_poslife~PEQ_possoc
+tMys <- estimate(NewLV_TS,db4)
+
+
+#Ineffability
+NewLV_Eff <-lvm(c(PEQ_poslife,PEQ_posself,PEQ_posmood,PEQ_possoc,PEQ_posbehav, PEQ_posspir)~lv.peq)
+regression(NewLV_Eff) <- lv.peq ~ MEQ_ineffability + age + Gender + Dose + Project
+regression(NewLV_Eff) <- MEQ_ineffability ~ Dose + age + Gender + Project
+latent(NewLV_Eff) <- ~lv.peq
+covariance(NewLV_Eff) <- PEQ_poslife~PEQ_possoc
+fMys <- estimate(NewLV_Eff,db4)
+
+#Mean
+NewLV_Mean <-lvm(c(PEQ_poslife,PEQ_posself,PEQ_posmood,PEQ_possoc,PEQ_posbehav, PEQ_posspir)~lv.peq)
+regression(NewLV_Mean) <- lv.peq ~ MEQ_mean + age + Gender + Dose + Project
+regression(NewLV_Mean) <- MEQ_mean ~ Dose + age + Gender + Project
+latent(NewLV_Mean) <- ~lv.peq
+meanMys <- estimate(NewLV_Mean,db4)
+
+#Rename bw adj dose
+db8 <- rename(db6, Dosebw = "BWadj Dose")
+db8 <- db8[-27,]
+
+#Mean with bwadj
+NewLV_Mean <-lvm(c(PEQ_poslife,PEQ_posself,PEQ_posmood,PEQ_possoc,PEQ_posbehav, PEQ_posspir)~lv.peq)
+regression(NewLV_Mean) <- lv.peq ~ MEQ_mean + age + Gender + Dosebw + Project
+regression(NewLV_Mean) <- MEQ_mean ~ Dosebw + age + Gender + Project
+latent(NewLV_Mean) <- ~lv.peq
+meanMysbw <- estimate(Mean_bw,db8)
+
+#Mystical
+NewLV_MYS <-lvm(c(PEQ_poslife,PEQ_posself,PEQ_posmood,PEQ_possoc,PEQ_posbehav, PEQ_posspir)~lv.peq)
+regression(NewLV_MYS) <- lv.peq ~ MEQ_mystical + age + Gender + Dosebw + Project
+regression(NewLV_MYS) <- MEQ_mystical ~ Dosebw + age + Gender + Project
+latent(NewLV_MYS) <- ~lv.peq
+covariance(NewLV_MYS) <- PEQ_poslife~PEQ_possoc
+eMysbw <- estimate(NewLV_MYS,db8)
+
+
+#Mood
+NewLV_Mood <-lvm(c(PEQ_poslife,PEQ_posself,PEQ_posmood,PEQ_possoc,PEQ_posbehav, PEQ_posspir)~lv.peq)
+regression(NewLV_Mood) <- lv.peq ~ MEQ_mood + age + Gender + Dosebw + Project
+regression(NewLV_Mood) <- MEQ_mood ~ Dosebw + age + Gender + Project
+latent(NewLV_Mood) <- ~lv.peq
+covariance(NewLV_Mood) <- MEQ_mood~PEQ_posspir 
+mMysbw <- estimate(NewLV_Mood,db8)
+
+
+#Timespace
+NewLV_TS <-lvm(c(PEQ_poslife,PEQ_posself,PEQ_posmood,PEQ_possoc,PEQ_posbehav, PEQ_posspir)~lv.peq)
+regression(NewLV_TS) <- lv.peq ~ MEQ_timespace + age + Gender + Dosebw + Project
+regression(NewLV_TS) <- MEQ_timespace ~ Dosebw + age + Gender + Project
+latent(NewLV_TS) <- ~lv.peq
+covariance(NewLV_TS) <- PEQ_poslife~PEQ_possoc
+tMysbw <- estimate(NewLV_TS,db8)
+
+
+#Ineffability
+NewLV_Eff <-lvm(c(PEQ_poslife,PEQ_posself,PEQ_posmood,PEQ_possoc,PEQ_posbehav, PEQ_posspir)~lv.peq)
+regression(NewLV_Eff) <- lv.peq ~ MEQ_ineffability + age + Gender + Dosebw + Project
+regression(NewLV_Eff) <- MEQ_ineffability ~ Dosebw + age + Gender + Project
+latent(NewLV_Eff) <- ~lv.peq
+covariance(NewLV_Eff) <- PEQ_poslife~PEQ_possoc
+fMysbw <- estimate(NewLV_Eff,db8)
+
+effects(meanMys, lv.peq~Dose)
+effects(meanMysbw, lv.peq~Dosebw)
+
+effects(eMys, lv.peq~Dose)
+effects(eMysbw, lv.peq~Dosebw)
+
+effects(mMys, lv.peq~Dose)
+effects(mMysbw, lv.peq~Dosebw)
+
+effects(tMys, lv.peq~Dose)
+effects(tMysbw, lv.peq~Dosebw)
+
+effects(fMys, lv.peq~Dose)
+effects(fMysbw, lv.peq~Dosebw)
+
+#MEQ Mystical Mood only
+NewLV_MM <-lvm(c(PEQ_poslife,PEQ_posself,PEQ_posmood,PEQ_possoc,PEQ_posbehav, PEQ_posspir)~lv.peq, c(MEQ_mood, MEQ_mystical)~lv.meq)
+regression(NewLV_MM) <- lv.peq ~ lv.meq + age + Gender + Dosebw + Project
+regression(NewLV_MM) <- lv.meq ~ Dosebw + age + Gender + Project
+latent(NewLV_MM) <- ~lv.peq
+latent(NewLV_MM) <- ~lv.meq
+MMest <- estimate(NewLV_MM,db8)
+Robust_confint(MMest)
+
+
+summary2(MMest, robust = T, cluster=db8$CIMBI.ID)
+```
+
+PPElv vs MEQ plots
+
+```{r}
+ppelv <- predict(meanMys, x = manifest(meanMys), y = latent(meanMys))
+
+db7 <- db6[-27,]
+
+db7$ppelv <- 0
+for (i in 1:length(db7$ppelv)) {
+  db7$ppelv[i] <- ppelv[i]
+}
+
+db7 <- rename(db7, Sex = Gender)
+
+
+PPElvTotal <- ggplot(db7, aes(x = MEQ_mean, y = ppelv)) +
+  geom_point(aes(colour = Project, shape = Sex), size = 2) +
+  stat_smooth (geom="line",method = "lm", alpha=0.3, size=1) +
+  scale_x_continuous(name = "MEQ Total Score", limits = c(0, 5)) +
+  scale_y_continuous(name = expression("PPE"[LV]), limits = c(0, 80))
+ggsave("ppelv_total.png", path = "", width = 7, height = 5)
+
+PPElvTimespace <- ggplot(db7, aes(x = MEQ_timespace, y = ppelv)) +
+  geom_point(aes(colour = Project, shape = Sex), size = 2) +
+  stat_smooth (geom="line",method = "lm", alpha=0.3, size=1) +
+  scale_x_continuous(name = "MEQ Transcendance of Time and Space", limits = c(0, 5)) +
+  scale_y_continuous(name = expression("PPE"[LV]), limits = c(0, 80)) +
+    theme(legend.position = "none")
+ggsave("ppelv_timespace.png", path = "", width = 7, height = 5)
+
+PPElvIneffability <- ggplot(db7, aes(x = MEQ_ineffability, y = ppelv)) +
+  geom_point(aes(colour = Project, shape = Sex), size = 2) +
+  stat_smooth (geom="line",method = "lm", alpha=0.3, size=1) +
+  scale_x_continuous(name = "MEQ Ineffability", limits = c(0, 5)) +
+  scale_y_continuous(name = expression("PPE"[LV]), limits = c(0, 80)) +
+    theme(legend.position = "none")
+ggsave("ppelv_ineffability.png", path = "", width = 7, height = 5)
+
+PPElvMystical <- ggplot(db7, aes(x = MEQ_mystical, y = ppelv)) +
+  geom_point(aes(colour = Project, shape = Sex), size = 2) +
+  stat_smooth (geom="line",method = "lm", alpha=0.3, size=1) +
+  scale_x_continuous(name = "MEQ Mystical", limits = c(0, 5)) +
+  scale_y_continuous(name = expression("PPE"[LV]), limits = c(0, 80)) +
+    theme(legend.position = "none")
+ggsave("ppelv_mystical.png", path = "", width = 7, height = 5)
+
+PPElvMood <- ggplot(db7, aes(x = MEQ_mood, y = ppelv)) +
+  geom_point(aes(colour = Project, shape = Sex), size = 2) +
+  stat_smooth (geom="line",method = "lm", alpha=0.3, size=1) +
+  scale_x_continuous(name = "MEQ Mood", limits = c(0, 5)) +
+  scale_y_continuous(name = expression("PPE"[LV]), limits = c(0, 80)) +
+    theme(legend.position = "none")
+ggsave("ppelv_mood.png", path = "", width = 7, height = 5)
+
+grid <- grid.arrange(PPElvTimespace, PPElvIneffability, PPElvMystical, PPElvMood, 
+             nrow = 2,
+             layout_matrix = rbind(c(1,2),
+                                   c(3,4)))
+ggsave("ppelv_grid.png", path = "", plot = grid)
+
+```
+
+Direct and indirect covariate effects
+
+```{r}
+effects(eMys, lv.peq~Dose)
+effects(eMys, lv.peq~age)
+effects(eMys, lv.peq~Project2)
+effects(eMys, lv.peq~Project3)
+
+effects(mMys, lv.peq~Dose)
+effects(mMys, lv.peq~age)
+effects(mMys, lv.peq~Project2)
+effects(mMys, lv.peq~Project3)
+
+effects(tMys, lv.peq~Dose)
+effects(tMys, lv.peq~age)
+effects(tMys, lv.peq~Project2)
+effects(tMys, lv.peq~Project3)
+
+effects(fMys, lv.peq~Dose)
+effects(fMys, lv.peq~age)
+effects(fMys, lv.peq~Project2)
+effects(fMys, lv.peq~Project3)
+
+effects(eMys, lv.peq~GenderMale)
+effects(mMys, lv.peq~GenderMale)
+effects(tMys, lv.peq~GenderMale)
+effects(fMys, lv.peq~GenderMale)
+
+effects(meanMys, lv.peq~Dose)
+effects(meanMys, lv.peq~age)
+effects(meanMys, lv.peq~GenderMale)
+effects(meanMys, lv.peq~Project2)
+effects(meanMys, lv.peq~Project3)
+```
+
+Confidence intervals
+
+```{r}
+
+#### START R CODE ####
+eMys2 <- eMys
+sCorrect(eMys2) <- TRUE
+summary2(eMys2, robust = T, cluster=db4$CIMBI.ID)
+compare2(eMys2, par = "lv.peq~MEQ_mystical")
+#### END R CODE ####
+
+
+#These are uncorrected confidence intervals
+eci <- as.data.frame(confint(eMys))
+eci <- cbind("Association" = rownames(eci), eci)
+writexl::write_xlsx(eci, "")
+
+mci <- as.data.frame(confint(mMys))
+mci <- cbind("Association" = rownames(mci), mci)
+writexl::write_xlsx(mci, "")
+
+tci <- as.data.frame(confint(tMys))
+tci <- cbind("Association" = rownames(tci), tci)
+writexl::write_xlsx(tci, "")
+
+fci <- as.data.frame(confint(fMys))
+fci <- cbind("Association" = rownames(fci), fci)
+writexl::write_xlsx(fci, "")
+
+
+Robust_confint <- function(lvm) {
+con <- summary2(lvm, robust = T, cluster=db4$CIMBI.ID)
+con <- con$coef[7,] #PEQ by MEQ subscale
+est <- con[,1] #estimate
+df <- con[,5] #df
+se <- con[,2] #se
+ci <- est + qt(c(0.025,0.975), df) * se
+return(ci)}
+
+Robust_estimate <- function(lvm) {
+con <- summary2(lvm, robust = T, cluster=db4$CIMBI.ID)
+con <- con$coef[7,] #PEQ by MEQ subscale
+est <- con[,1] #estimate
+return(est)}
+
+```
+
+Confint plots
+
+```{r}
+confintplot <- data.frame(matrix(ncol = 4, nrow = 5))
+colnames(confintplot) <- c("subscale", "estimate", "LCI", "UCI")
+confintplot$subscale <- c("mean", "mystical", "mood", "timespace", "ineffability")
+confintplot$estimate <- c(Robust_estimate(meanMys), Robust_estimate(eMys),Robust_estimate(mMys),Robust_estimate(tMys),Robust_estimate(fMys))
+confintplot$LCI <- c(Robust_confint(meanMys)[1],Robust_confint(eMys)[1],Robust_confint(mMys)[1],Robust_confint(tMys)[1],Robust_confint(fMys)[1])
+confintplot$UCI <- c(Robust_confint(meanMys)[2], Robust_confint(eMys)[2],Robust_confint(mMys)[2],Robust_confint(tMys)[2],Robust_confint(fMys)[2])
+
+level_order <- factor(confintplot$subscale, level = c('ineffability','timespace','mystical','mood', 'mean'))
+
+CIplot <- ggplot(confintplot, aes(x = estimate, y = level_order, colour = subscale)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(xmin=LCI, xmax=UCI), width=0.2, size = 1) +
+  #theme_minimal() +
+  theme(legend.title = element_blank(), legend.position = "none") +
+  xlab(expression(paste("Change in PPE"[LV]," per MEQ unit ± 95% Confidence Interval"))) +
+  ylab(label = "") +
+  geom_vline(xintercept = 0, size = 0.75) +
+  labs(title = "Relation Between MEQ and Persisting Positive Effects \nAttributed to Psilocybin") +
+  scale_y_discrete(labels = c("Ineffability", "Transcendance of\n Time and Space", "Mysticality", "Positive Mood", "MEQ Total")) +
+  theme(axis.text.y.left = element_text(size = 11))
+
+ggsave("CIplot_mean.png", path = "", plot = CIplot, width = 7, height = 5, dpi = 500)
+```
+
+Create tables of robust LVM outputs
+
+```{r}
+mean <- summary2(meanMys, robust = T, cluster=db4$CIMBI.ID)
+mean <- as.data.frame(mean$coef)
+mean <- cbind("Association" = rownames(mean), 
+           "Measurement" = c(rep("Measurements", 6), 
+                             rep("Regressions", 11), 
+                             rep("Residual Variances", 8), 
+                             rep("Intercepts", 8)),mean)
+writexl::write_xlsx(mean, "")
+
+e <- summary2(eMys, robust = T, cluster=db4$CIMBI.ID)
+e <- as.data.frame(e$coef)
+e <- cbind("Association" = rownames(e), 
+           "Measurement" = c(rep("Measurements", 6), 
+                             rep("Regressions", 11), 
+                             rep("Residual Variances", 9), 
+                             rep("Intercepts", 8)),e)
+writexl::write_xlsx(e, "")
+
+m <- summary2(mMys, robust = T, cluster=db4$CIMBI.ID)
+m <- as.data.frame(m$coef)
+m <- cbind("Association" = rownames(m), 
+          "Measurement" = c(rep("Measurements", 6), 
+                            rep("Regressions", 11), 
+                            rep("Residual Variances", 9), 
+                            rep("Intercepts", 8)),m)
+writexl::write_xlsx(m, "")
+
+t <- summary2(tMys, robust = T, cluster=db4$CIMBI.ID)
+t <- as.data.frame(t$coef)
+t <- cbind("Association" = rownames(t), 
+          "Measurement" = c(rep("Measurements", 6), 
+                            rep("Regressions", 11), 
+                            rep("Residual Variances", 9), 
+                            rep("Intercepts", 8)),t)
+writexl::write_xlsx(t, "")
+
+f <- summary2(fMys, robust = T, cluster=db4$CIMBI.ID)
+f <- as.data.frame(f$coef)
+f <- cbind("Association" = rownames(f), 
+          "Measurement" = c(rep("Measurements", 6), 
+                            rep("Regressions", 11), 
+                            rep("Residual Variances", 9), 
+                            rep("Intercepts", 8)),f)
+writexl::write_xlsx(f, "")
+```
+
+Linear models for sex differences
+
+Summary outputs with bw adjusted dose
+
+```{r}
+mean <- summary2(meanMysbw, robust = T, cluster=db8$CIMBI.ID)
+mean <- as.data.frame(mean$coef)
+mean <- cbind("Association" = rownames(mean), 
+           "Measurement" = c(rep("Measurements", 6), 
+                             rep("Regressions", 11), 
+                             rep("Residual Variances", 8), 
+                             rep("Intercepts", 8)),mean)
+writexl::write_xlsx(mean, "")
+
+e <- summary2(eMysbw, robust = T, cluster=db8$CIMBI.ID)
+e <- as.data.frame(e$coef)
+e <- cbind("Association" = rownames(e), 
+           "Measurement" = c(rep("Measurements", 6), 
+                             rep("Regressions", 11), 
+                             rep("Residual Variances", 9), 
+                             rep("Intercepts", 8)),e)
+writexl::write_xlsx(e, "")
+
+m <- summary2(mMysbw, robust = T, cluster=db8$CIMBI.ID)
+m <- as.data.frame(m$coef)
+m <- cbind("Association" = rownames(m), 
+          "Measurement" = c(rep("Measurements", 6), 
+                            rep("Regressions", 11), 
+                            rep("Residual Variances", 9), 
+                            rep("Intercepts", 8)),m)
+writexl::write_xlsx(m, "")
+
+t <- summary2(tMysbw, robust = T, cluster=db8$CIMBI.ID)
+t <- as.data.frame(t$coef)
+t <- cbind("Association" = rownames(t), 
+          "Measurement" = c(rep("Measurements", 6), 
+                            rep("Regressions", 11), 
+                            rep("Residual Variances", 9), 
+                            rep("Intercepts", 8)),t)
+writexl::write_xlsx(t, "")
+
+f <- summary2(fMysbw, robust = T, cluster=db8$CIMBI.ID)
+f <- as.data.frame(f$coef)
+f <- cbind("Association" = rownames(f), 
+          "Measurement" = c(rep("Measurements", 6), 
+                            rep("Regressions", 11), 
+                            rep("Residual Variances", 9), 
+                            rep("Intercepts", 8)),f)
+writexl::write_xlsx(f, "")
+```
+
+Sex differences
+
+```{r}
+
+db3_negPEQ <- db3 %>% 
+  rowwise() %>%
+  mutate(PEQ_neg = mean(c(PEQ_negbehav, PEQ_negspir, PEQ_neglife, PEQ_negmood, PEQ_negself, PEQ_negsoc), na.rm = T)) %>%
+  ungroup()
+
+male <- db3_negPEQ %>% filter(Gender == "Male")
+female <- db3_negPEQ %>% filter(Gender == "Female")
+
+db2$CIMBI.ID <- as.factor(db2$CIMBI.ID)
+
+summary(lme(PEQ_pos~Gender, data = db2, random=~1|CIMBI.ID, na.action = na.omit))
+summary(lme(PEQ_neg~Gender, data = db3_negPEQ, random=~1|CIMBI.ID, na.action = na.omit))
+summary(lme(age~Gender, data = db3, random=~1|CIMBI.ID, na.action = na.omit))
+
+summary(lme(MEQ_ineffability~Gender, data = db3, random=~1|CIMBI.ID, na.action = na.omit))
+summary(lme(MEQ_timespace~Gender, data = db3, random=~1|CIMBI.ID, na.action = na.omit))
+summary(lme(MEQ_mood~Gender, data = db3, random=~1|CIMBI.ID, na.action = na.omit))
+summary(lme(MEQ_mystical~Gender, data = db3, random=~1|CIMBI.ID, na.action = na.omit))
+summary(lme(MEQ_mean~Gender, data = db3, random=~1|CIMBI.ID, na.action = na.omit))
+
+#95% confidence interval = effect size ± 1.96 × standard error of the effect size
+
+```
+
+Make a table describing each individual
+
+```{r}
+#MEQ subscales, PEQ subscales, Dose (flat and mg/kg), Gender
+
+db2_datearr <- db2 %>% arrange(date)
+
+db2Doses_datearr <- db2Doses %>% arrange(date) %>% select(-Gender, -date, -CIMBI.ID)
+
+Qualtable <- cbind(db2_datearr, db2Doses_datearr)
+
+Qualtable <- Qualtable %>% 
+  select(-date, -Project, -CIMBI.ID, -PEQ_pos) %>% 
+  rename("Bodyweight Adjusted Dose (mg/kg)" = "bw_dose") %>% 
+  relocate("Report", "Gender", "Weight (kg)", "Dose", "Bodyweight Adjusted Dose (mg/kg)")
+
+writexl::write_xlsx(Qualtable, "")
+```
+
+PEQ plot
+
+```{r}
+fullmys_gg2 <- fullmystical[-17,] %>% select(PEQ_poslife:PEQ_negspir)
+fullmys_boxplot <- fullmys_gg2 %>% pivot_longer(PEQ_poslife:PEQ_negspir, values_to = "Score", names_to = "Subscale")
+fullmys_boxplot$Mystical <- "M"
+
+ggplot(fullmys_boxplot, aes(x = Subscale, y = Score, fill = Subscale)) +
+  geom_boxplot() + theme_minimal() +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) +
+  labs(title = element_text("A: PEQ scores for Complete Mystical Experiences by Subscale")) +
+  scale_fill_manual(name = "Subscale", labels = c("Negative Behaviour", "Negative Attitudes About Life", "Negative Mood", "Negative Attitudes About Self", "Negative Social Effects", "Reduced Spirituality", "Positive Behaviour", "Positive Life", "Positive Mood", "Positive Self", "Positive Social Effects", "Increased Spirituality"), values = c("tomato4", "tomato3", "tomato2", "tomato1", "tomato", "salmon3", "dodgerblue4", "deepskyblue4", "deepskyblue3", "deepskyblue2", "deepskyblue1", "deepskyblue")) +
+  ylab(label = "Score")
+ggsave("CME_PEQ_boxplot.png", path = "", width = 7, height = 5, dpi = 1000)
+
+nonmys_gg2 <- non_mystical %>% select(PEQ_poslife:PEQ_negspir)
+nonmys_boxplot <- nonmys_gg2 %>% pivot_longer(PEQ_poslife:PEQ_negspir, values_to = "Score", names_to = "Subscale")
+nonmys_boxplot$Mystical <- "NM"
+
+ggplot(nonmys_boxplot, aes(x = Subscale, y = Score, fill = Subscale)) +
+  geom_boxplot() + theme_minimal() +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) +
+  labs(title = element_text("B: PEQ scores for non-Complete Mystical Experiences by Subscale")) +
+  scale_fill_manual(name = "Subscale", labels = c("Negative Behaviour", "Negative Attitudes About Life", "Negative Mood", "Negative Attitudes About Self", "Negative Social Effects", "Reduced Spirituality", "Positive Behaviour", "Positive Life", "Positive Mood", "Positive Self", "Positive Social Effects", "Increased Spirituality"), values = c("tomato4", "tomato3", "tomato2", "tomato1", "tomato", "salmon3", "dodgerblue4", "deepskyblue4", "deepskyblue3", "deepskyblue2", "deepskyblue1", "deepskyblue")) +
+  ylab(label = "Score")
+ggsave("nonCME_PEQ_boxplot2.png", path = "", width = 7, height = 5, dpi = 1000)
+
+PEQ_boxplot <- rbind(fullmys_boxplot, nonmys_boxplot)
+
+PEQ_boxplot <- PEQ_boxplot%>%
+  relocate(Mystical) %>%
+  separate(Subscale, into = c("Del", "Scale")) %>%
+  select(-Del) %>%
+  unite(Mys_Sub, Mystical:Scale, sep = "_", remove = F) %>%
+  separate(Mys_Sub, into = c("half", "type"), sep = "pos", remove = F) %>%
+  select(-half) %>%
+  separate(Mys_Sub, into = c("half", "type2"), sep = "neg", remove = F) %>%
+  mutate(area = coalesce(type2,type)) %>%
+  select(-half, -type2, -type) %>%
+  mutate(Valence = rep(c("Positive", "Negative"),length(PEQ_boxplot$Subscale)/2))
+
+#Groups by "Life", "Behaviour" etc
+PEQ_boxplot$Mys_Sub <- factor(PEQ_boxplot$Mys_Sub, levels = c("M_poslife", "NM_poslife", "M_neglife", "NM_neglife",  "M_posself", "NM_posself",  "M_negself", "NM_negself",  "M_posmood",  "NM_posmood", "M_negmood",   "NM_negmood","M_possoc",  "NM_possoc",  "M_negsoc",  "NM_negsoc",  "M_posbehav", "NM_posbehav", "M_negbehav", "NM_negbehav", "M_posspir", "NM_posspir",  "M_negspir", "NM_negspir"))
+
+PEQ_boxplot$Mystical <- factor(PEQ_boxplot$Mystical)
+PEQ_boxplot$valence <- factor(PEQ_boxplot$valence, levels = c("Positive", "Negative"))
+
+labs <- c("Behaviour", "Attitudes about Life", "Mood", "Attitudes about Self", "Social Effects", "Spirituality")
+names(labs) <- c("behav", "life", "mood", "self", "soc", "spir")
+
+ggplot(PEQ_boxplot, aes(x = Mys_Sub, y = Score, fill = Mystical, colour = valence)) +
+  geom_boxplot() + 
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) +
+  labs(title = element_text("PEQ scores for Complete and Non-Complete Mystical Experiences by Subscale")) +
+  ylab(label = "Score") +
+  facet_wrap(~area, scales = "free", labeller = labeller(area = labs), ncol = 3) +
+  scale_colour_manual(name = "Valence", labels = c("Positive/Increase", "Negative/Decrease"), values = c("black", "black")) +
+  scale_fill_manual(name = "Mystical", labels = c("Mystical", "Non-Mystical"), values = c("#AB82FF", "deepskyblue2")) +
+  scale_y_continuous(limits = c(0,100))
+
+PEQ_boxplot <- PEQ_boxplot %>%
+  unite(Mys_val, Mystical, valence, remove = F)
+
+PEQ_boxplot$Mys_val <- factor(PEQ_boxplot$Mys_val, levels = c("M_Positive", "NM_Positive", "M_Negative", "NM_Negative"))
+
+ggplot(PEQ_boxplot, aes(x = Mys_val, y = Score, fill = Mys_val, colour = Mys_val)) +
+  geom_boxplot(lwd = 0.4, fatten = 3) + 
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) +
+  labs(title = element_text("PEQ scores for Complete and Non-Complete Mystical Experiences by Subscale")) +
+  ylab(label = "Score") +
+  facet_wrap(~area, scales = "free_x", labeller = labeller(area = labs), ncol = 3) +
+  scale_fill_manual(name = "Mystical - Valence", labels = c("CME - Positive", "Non-CME - Positive", "CME - Negative", "Non-CME Negative"), values = c("#AB82FF", "deepskyblue2", "#5D478B", "#1874CD")) +
+  scale_colour_manual(name = "Mystical - Valence", labels = c("CME - Positive", "Non-CME - Positive", "CME - Negative", "Non-CME Negative"), values = c("#5D478B", "#104E8B", "#330066", "#00008B")) +
+  scale_y_continuous(limits = c(0,100))
+
+ggsave("MEQ_PEQ_boxplot2.png", path = "", width = 7, height = 5, dpi = 500)
+```
+
+Mystical table split
+
+```{r}
+#Develop db5
+
+#Trying to work out naivity
+pre$Naive = c("y", "n", "n", "y", "y", "y", "y", "n", "n", "n", "y", "y", "y", "y", "y", "n", "y", "n", "y", "y", "n", "y", "y", "n", "y", "y", "y", "y", "y", "y", "y", "y", "y", "y", "y", "n", "n")
+
+pre$ID
+db3_order$CIMBI.ID
+
+(unique(pre$ID) %in% unique(db3_order$CIMBI.ID))
+(unique(db3_order$CIMBI.ID) %in% unique(pre$ID))
+
+pre <- pre %>% rename("Drug.Use" = "Drug Use")
+pre2 <- rbind(pre, )
+
+pre3 <- pre2[c(-3, -6, -7, -11),]
+
+pre4 <- rbind(pre3, )
+
+pre4 <- pre4 %>% arrange(ID)
+db3 <- db3 %>% arrange(CIMBI.ID)
+
+pre5 <- pre4 %>% select(-Drug.Use)
+
+db5 <- cbind(db3, pre5$Naive)
+
+db5 <- arrange(db5, Report)
+
+db5 <- cbind(db5, Qualtable$`Weight (kg)`, Qualtable$`Bodyweight Adjusted Dose (mg/kg)`)
+
+db5 <- db5 %>% rename("Weight" = "Qualtable$`Weight (kg)`", "BWadj Dose" = "Qualtable$`Bodyweight Adjusted Dose (mg/kg)`")
+
+Baseline <- Baseline_psych %>% arrange(Date)
+
+db6 <- cbind(db5, Baseline$MDI, Baseline$`Cohen PSS (at scan)`, Baseline$`PSQI global score`)
+
+db6 <- db6 %>% rename("MDI" = "Baseline$MDI", "PSS" = "Baseline$`Cohen PSS (at scan)`", "PSQI" = "Baseline$`PSQI global score`")
+
+fullmystical <- db6 %>%
+  filter(MEQ_ineffability >= 3) %>%
+  filter(MEQ_mystical >= 3) %>%
+  filter(MEQ_mood >= 3) %>%
+  filter(MEQ_timespace >= 3)
+
+nonCME <- db6 %>%
+  filter(MEQ_ineffability < 3 | MEQ_mystical < 3 | MEQ_mood <3 | MEQ_timespace <3)
+
+sd(nonCME$MEQ_mean)
+
+db8 <- db6 %>%
+  mutate(mystical = as.factor(ifelse(MEQ_ineffability >= 3 &  MEQ_mystical >= 3 & MEQ_mood >= 3 & MEQ_timespace >= 3, "Mystical", "Non-Mystical")))
+
+CMEproj <- table(project = db8$Project, mystical = db8$mystical)
+xsq <- chisq.test(CMEproj,p = p, simulate.p.value = TRUE, B = 10000)
+
+CMEp3 <- table(CME = c(rep("yes", 1), rep("no", 3)))
+x <- chisq.test(CMEp3)
+x$expected
+```
+
+Peak psilo conc relation to MEQ and PPELV
+
+```{r}
+project3 <- db7[db7$Project==3,]
+
+P3_psilo_MEQ <- P3_psilo[P3_psilo$CIMBI.ID %in% project3$CIMBI.ID,]
+P3_psilo_MEQ <- P3_psilo_MEQ[complete.cases(P3_psilo_MEQ),]
+
+P3_psilo_list <- split(P3_psilo_MEQ, f=P3_psilo_MEQ$CIMBI.ID)
+
+max_psi <- sapply(names(P3_psilo_list), function(i){
+value <- max(P3_psilo_list[[i]]$psi_conc)
+return(c(value, i))}
+)
+
+p3MEQpsi <- data.frame(CIMBI_ID = max_psi[2,], max_psi = max_psi[1,])
+rownames(p3MEQpsi) <- c()
+
+project3 <- arrange(project3, CIMBI.ID)
+p3MEQpsi <- arrange(p3MEQpsi, CIMBI_ID)
+
+project3$max_psi <- as.double(p3MEQpsi$max_psi)
+
+ggplot(project3, aes(x = max_psi, y = MEQ_mean)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = F) +
+  labs(x = "Maximum Plasma Psilocin Concentration (µg/L)", y = "MEQ Total", title = "A: Relation Between Peak Plasma Psilocin Concentration and \nMEQ total score") +
+  annotate("text", x = 0.025, y=4.5, label = "p = 0.88,\n Multiple R-squared:  0.001")
+ggsave("", height = 5, width = 8, dpi = 500)
+
+summary(lm(max_psi~MEQ_mean, data = project3))
+
+ggplot(project3, aes(x = max_psi, y = ppelv)) +
+  geom_point()+
+  geom_smooth(method = "lm", se = F) +
+  labs(x = "Maximum Plasma Psilocin Concentration (µg/L)", y = expression("PPE"[LV]), title = "B: Relation Between Peak Plasma Psilocin Concentration and \nPersisting Positive Effects") +
+    annotate("text", x = 0.025, y=65, label = "p = 0.35,\n Multiple R-squared = 0.05")
+ggsave("", height = 5, width = 8, dpi = 500)
+
+summary(lm(max_psi~ppelv, data = project3))
+
+```
+
